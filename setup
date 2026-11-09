@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""Client setup entry point; all credentials are collected in the terminal."""
+import sys
+
+sys.dont_write_bytecode = True
+if sys.version_info < (3, 11):
+    raise SystemExit("Python 3.11 or newer is required.")
+
+from installer.cli import main
+
+raise SystemExit(main())

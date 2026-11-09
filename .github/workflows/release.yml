@@ -1,0 +1,43 @@
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing verified version tag, e.g. v0.2.0-rc.1
+        required: true
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          components: rustfmt, clippy
+      - name: Check license and release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          test -s LICENSE
+          python3 -c 'import os,tomllib; p=tomllib.load(open("Cargo.toml","rb"))["package"]; assert p.get("license") and os.environ["RELEASE_TAG"] == "v"+p["version"]'
+      - name: Test dependencies
+        run: sudo apt-get update && sudo apt-get install -y samba samba-common-bin smbclient gnupg
+      - run: cargo fetch --locked
+      - run: cargo fmt --check
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: python3 -B -m unittest discover -s tests -p 'test_*.py' -v
+      - run: bash scripts/portable-build.sh
+      - run: python3 -B scripts/release.py --require-license
+      - name: Publish exact tagged artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_REPO: ${{ github.repository }}
+        run: python3 -B scripts/publish.py --repo "$RELEASE_REPO" --tag "$RELEASE_TAG" --publish

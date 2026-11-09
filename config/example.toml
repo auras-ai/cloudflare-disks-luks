@@ -1,0 +1,76 @@
+# Baseline: Ubuntu Server 24.04 LTS, Linux gateway only.
+# Build: pinned release builder Rust 1.98.1; locked dependencies require >= 1.88.
+# Runtime: rclone >= 1.70 (vfs/queue API), Samba smbd/testparm/pdbedit >= 4.19,
+# libfuse3/fusermount3 >= 3.14, kernel FUSE and accessible /dev/fuse.
+# apt install rclone samba samba-common-bin fuse3 (check installed versions).
+# Run as r2disk, never root. The packaged systemd unit grants inherited
+# CAP_NET_BIND_SERVICE for TCP 445; keep the distro setuid fusermount3 helper.
+# See README.md for provisioning; never stop/replace an existing Samba service.
+# No firewall changes are automatic. Only allow SMB on trusted LAN/existing VPN.
+# Interface selection is explicit; doctor cannot prove an interface is private.
+# Edit all paths: owned 0700 directories, no symlinks, no overlapping trees.
+# Init checks LUKS2 provenance BEFORE creating missing directories; no fallback.
+# First manually unlock/mount the filesystem root at /srv/r2-disk (README runbook).
+# Unmounted underlay: root-owned 0700. State/cache are siblings on that filesystem.
+# No unencrypted nested mounts; disable/encrypt swap and disable host crash dumps.
+# sudo -u r2disk /usr/local/bin/cloudflare-disk init --config config/example.toml
+# Or --secrets-file /absolute/protected-input.toml (owned, single-link 0600):
+# keys: access_key_id, secret_access_key, smb_password, crypt_password, crypt_salt.
+# Crypt password and salt each require 16+ bytes; back up both independently.
+# No secrets in this file. State/cache/secrets require host-managed LUKS2 storage.
+# CLI serve, initialize-destination and crypt-aware status are available.
+# Complete live R2/SMB and LUKS acceptance for each deployment before relying on it.
+# Status reports crypt VFS health; independent decrypted readback verifies uploads.
+# Use bucket-scoped R2 access credentials and a unique 12+ byte SMB password.
+# Run doctor in the capability-enabled transient unit documented in README.md.
+# serve provisions the private SMB password DB from secrets.toml on each start,
+# then supervises encrypted SMB3 and FUSE; status reports mount/upload health.
+# Use ONE gateway and the SAME state/cache/mount paths on every restart.
+# The local instance lock is NOT distributed; external bucket writers unsupported.
+# Never delete dirty cache or recovery.json. Changed recovery flags fail closed.
+# SIGTERM drains uploads for 60s, then stops; timeout reports UNSYNCED DATA.
+# SMB acknowledgement is not remote durability; preserve cache after failures.
+# RC is authenticated on 127.0.0.1 only. Gateway-user/root processes are trusted.
+# rclone 1.70 API verified against upstream vfs/rc.go; runtime checks rc/list.
+# Health requests have 2s deadlines each; shutdown may exceed drain budget by
+# one health sample plus bounded child/unmount termination (up to 10s).
+# Init does not verify R2 access; doctor does not contact the cloud.
+# Cache target/minimum free space are soft rclone limits, not a disk reservation.
+# 10 GiB target / 1 GiB free below are examples, not safe for every workload.
+# Offline writes can fill disk; SMB save/flush is local acceptance, NOT R2 upload.
+# No databases, VM disks, other gateways or external concurrent bucket writes.
+# No firewall ports are opened. Off-site clients require an existing VPN.
+bucket = "my-private-bucket"
+endpoint = "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com"
+state_dir = "/srv/r2-disk/state"
+cache_dir = "/srv/r2-disk/cache"
+mount_dir = "/srv/r2-disk/mount"
+share = "cloud"
+interface = "enp1s0"
+# New guided setups pin SMB to a selected private address on this interface:
+# listen_address = "192.168.50.2"
+min_free_bytes = 1073741824
+cache_target_bytes = 10737418240
+writeback_seconds = 5
+control_port = 5572
+
+# NEW, dedicated, empty destination only. Never reuse/relabel plaintext data.
+# Local init does NOT initialize the remote identity marker. Do not invent one.
+# Migration: stop writers, drain/independently verify source, initialize NEW prefix,
+# copy THROUGH crypt, compare decrypted hashes with an independent backup-key reader,
+# then switch only after success; retain source/cache/keys for rollback. Never sync,
+# auto-delete legacy objects, or encrypt a live disk-image file on rclone mount.
+# R2 sees sizes/counts/hierarchy/timing; unlocked root/gateway UID sees plaintext.
+# Crypt keys + profile backup and LUKS header + unlock credentials need independent
+# protected offline backups. Key loss is unrecoverable; backups also need data.
+# Crypt key rotation requires a new-prefix full copy, NOT editing these settings.
+# R2 credential rotation is separate. Budget duplicate storage/API costs/downtime.
+# After new writes, rollback needs reconciliation; old header backups may retain
+# revoked LUKS passphrase access. See README recovery/rotation boundaries.
+# Version pins standard filename encryption and directory-name encryption.
+# Keep mode, prefix and nonsecret key_id immutable; choose a fresh random
+# 32-hex key_id per key set. It is a label, NOT proof of the correct keys.
+[encryption]
+mode = "rclone-crypt-v1"
+prefix = "encrypted-files-v1"
+key_id = "0123456789abcdef0123456789abcdef"

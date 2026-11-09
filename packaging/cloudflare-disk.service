@@ -1,0 +1,44 @@
+[Unit]
+Description=Single-gateway R2 disk (foreground Rust supervisor)
+Wants=network-online.target
+After=network-online.target srv-r2\x2ddisk.mount
+RequiresMountsFor=/srv/r2-disk
+BindsTo=srv-r2\x2ddisk.mount
+# Administrator supplies this mount unit and unlocks LUKS2; never format here.
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=r2disk
+Group=r2disk
+UMask=0077
+LimitCORE=0
+# Disable swap or use encrypted swap; LUKS does not protect RAM or host crash dumps.
+# The unmounted /srv/r2-disk underlay must be root-owned and inaccessible to r2disk.
+WorkingDirectory=/srv/r2-disk/state
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/srv/r2-disk/state
+Environment=TMPDIR=/srv/r2-disk/state/tmp
+Environment=XDG_CACHE_HOME=/srv/r2-disk/cache
+ExecStart=/usr/local/bin/cloudflare-disk serve --config /srv/r2-disk/state/profile.toml
+# smbd inherits this: non-root alone cannot bind TCP 445 on a normal host.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+# Keep the distro's setuid fusermount3 mount/unmount path functional. Do not add
+# NoNewPrivileges, a narrow CapabilityBoundingSet, or PrivateDevices blindly.
+# No mount namespace sandbox: operator status/recovery sees the same FUSE mount.
+NoNewPrivileges=no
+PrivateDevices=no
+KillMode=mixed
+KillSignal=SIGTERM
+# Main supervisor stops SMB first, drains for 60s, then unmounts. Kill remaining
+# cgroup children only after supervisor exits or this generous deadline expires.
+TimeoutStopSec=120
+SendSIGKILL=yes
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

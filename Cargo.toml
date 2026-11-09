@@ -1,0 +1,25 @@
+[package]
+name = "cloudflare-disk"
+version = "0.2.0-rc.1"
+edition = "2021"
+rust-version = "1.88"
+description = "Encrypted, single-gateway Cloudflare R2 network disk for Linux and SMB3 clients"
+repository = "https://github.com/auras-ai/cloudflare-disks-luks"
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"
+serde_json = "1"
+ureq = { version = "2", features = ["json"], default-features = false }
+base64 = "0.22"
+signal-hook = "0.3"
+socket2 = "0.6"
+rpassword = "7"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+tempfile = "3"
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
