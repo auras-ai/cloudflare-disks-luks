@@ -80,7 +80,7 @@ def public_dir(path):
             'Installation directory must be root-owned and not writable by others')
 
 
-def install(paths, source):
+def install(paths, source, plan):
     binary = source / 'bin/cloudflare-disk'
     require(binary.is_file() and not binary.is_symlink(), 'Use a binary release bundle (bin/cloudflare-disk is missing)')
     install_same(paths.binary, binary.read_bytes(), mode=0o755)
@@ -95,7 +95,7 @@ def install(paths, source):
     install_same(paths.command, launcher, mode=0o755)
     install_same(paths.units / MOUNT_UNIT,
                  '[Unit]\nDescription=Encrypted Cloudflare disk storage (manual unlock)\n\n'
-                 f'[Mount]\nWhat={paths.mapper}\nWhere={paths.storage}\nType=ext4\nOptions=nodev,nosuid\n', mode=0o644)
+                 f'[Mount]\nWhat={paths.mapper}\nWhere={paths.storage}\nType=ext4\nOptions={plan.mount_options}\n', mode=0o644)
     install_same(paths.units / SERVICE, (source / 'packaging/cloudflare-disk.service').read_bytes(), mode=0o644)
     public_dir(paths.units / (SERVICE + '.d'))
     install_same(paths.units / (SERVICE + '.d/10-client.conf'),

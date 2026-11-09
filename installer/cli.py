@@ -38,8 +38,9 @@ def gather():
     require(0 <= selected < len(choices), 'Choose a displayed interface number')
     interface, address, prefix = choices[selected]
     network = ask('Allowed client IPv4 network (CIDR)', str(ipaddress.ip_network(f'{address}/{prefix}', strict=False)))
+    print('Local disk usage starts with filesystem/encryption metadata and grows with cached data.')
     plan = Plan(account_id=account, bucket=bucket, cloud_mode=mode, interface=interface,
-                address=address, network=network, size_gib=int(ask('Local encrypted image size in GiB', '16')),
+                address=address, network=network, size_gib=int(ask('Maximum local volume capacity in GiB', '16')),
                 location=ask('R2 location hint (auto, apac, eeur, enam, weur, wnam, oc)', 'auto') if mode == 'create' else 'auto')
     return plan.validate()
 
@@ -68,7 +69,9 @@ def install(paths, source, *, resume=False, install_deps=False, import_r2=False)
         dependencies.check()
         plan = gather()
         host.network(plan)
-        print(f'\nNew {plan.size_gib} GiB image: {paths.image}\nR2: {plan.bucket}/{plan.prefix}\n'
+        print(f'\nOn-demand encrypted image: {paths.image}\n'
+              f'Maximum capacity: {plan.size_gib} GiB; local space grows with metadata and written data.\n'
+              f'R2: {plan.bucket}/{plan.prefix}\n'
               f'SMB: {plan.address}:445 from {plan.network} on {plan.interface}\n'
               'Creates r2disk, private service state and an SMB-only firewall guard. Manual unlock after reboot.')
         confirm('Create this gateway?', 'create')
@@ -92,7 +95,7 @@ def install(paths, source, *, resume=False, install_deps=False, import_r2=False)
         recovery.prepare(paths, ledger, material)
         del material
         if not ledger.get('files_installed'):
-            host.install(paths, source)
+            host.install(paths, source, ledger.plan)
             ledger.set(files_installed=True)
         print('Verifying encrypted destination…', flush=True)
         host.destination(paths, ledger)

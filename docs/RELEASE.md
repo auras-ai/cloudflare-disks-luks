@@ -17,8 +17,10 @@ Evidence and limits:
 - Automated Rust tests cover validation, storage provenance, private state,
   SMB configuration, lifecycle/control behavior and CLI gates.
 - Python tests cover API/policy contracts, interrupted setup boundaries,
-  refusing foreign storage, preserving keys, ambiguous token creation, redaction,
-  encrypted recovery export and release allowlist/content verification.
+  refusing foreign storage, preserving keys, sparse allocation/discard policy and
+  real ext4 metadata sizing/low-space recovery,
+  ambiguous token creation, redaction, encrypted recovery export and release
+  allowlist/content verification.
 - Preparation checks on 2026-11-08 passed: **28 Rust tests**, **23 Python tests**,
   Rust formatting and strict all-targets Clippy, workflow/Python/shell syntax,
   real GPG export/decrypt, and nftables syntax validation in an isolated network
@@ -111,6 +113,9 @@ On a disposable clean Ubuntu gateway with a dedicated R2 bucket, record:
    on disposable data; verify retained cache and fail-closed writer behavior.
 6. Restore/decrypt the exported recovery archive on a separate machine and read
    uploaded data without the gateway cache. Test LUKS header recovery on a clone.
+7. Measure the sparse backing file's allocated blocks before/after cache writes,
+   deletion/eviction and TRIM. Repeat after reboot/unlock; verify original file
+   bytes, persisted discard passthrough and the systemd mount's `discard` option.
 
 The historical Docker fault hook intentionally refuses destructive testing and
 is not a substitute for these host-managed encrypted-storage tests.

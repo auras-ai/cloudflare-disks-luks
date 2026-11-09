@@ -11,8 +11,11 @@ See [release status](docs/RELEASE.md).
 ## One setup session
 
 Use an existing **Ubuntu Server 24.04 x86_64** gateway with systemd, Python 3.11+,
-a static/reserved private IPv4 address and enough local disk space (20 GiB free
-for the default 16 GiB image). R2 must be activated in the client's account.
+a static/reserved private IPv4 address and local free space for filesystem metadata,
+setup files and the data you actually cache. Setup calculates the metadata/workspace
+budget (roughly 0.5 GiB for the default filesystem). The sparse image's 16 GiB
+capacity ceiling is not reserved: physical usage grows with written data and
+metadata. R2 must be activated in the client's account.
 
 Binary archives and `SHA256SUMS` will be published on the
 [Releases page](https://github.com/auras-ai/cloudflare-disks-luks/releases).
@@ -28,8 +31,8 @@ sudo ./setup install --install-deps
 
 The terminal session collects the account, bucket, LAN/VPN network and passwords.
 It creates the private bucket and bucket-scoped R2 credential (or imports an
-existing credential), allocates LUKS2 storage, generates the file-encryption keys,
-installs the dedicated service and firewall guard, tests encrypted SMB and an
+existing credential), creates sparse LUKS2 storage, generates file-encryption
+keys, installs the dedicated service and firewall guard, tests encrypted SMB and an
 independent R2 decrypt, and exports an encrypted recovery archive.
 
 - **Client-session checklist:** [docs/CLIENT-SETUP.md](docs/CLIENT-SETUP.md)
@@ -63,6 +66,11 @@ LUKS passphrase. The gateway remains locked until this manual step.
 R2 stores encrypted files, not a mounted LUKS image. Object sizes, counts and
 access patterns remain visible. An unlocked gateway/root or an authenticated
 client can access plaintext. Keep swap/hibernation encrypted or disabled.
+
+Local storage grows with cached data plus filesystem/encryption overhead. Discard
+passthrough and ext4 discard-on-free reclaim deleted cache blocks automatically;
+setup/unlock also trim free space. See
+[local disk usage](docs/OPERATIONS.md#local-disk-usage).
 
 ## Operational boundaries
 

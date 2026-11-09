@@ -11,7 +11,7 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Test dependencies
-        run: sudo apt-get update && sudo apt-get install -y samba samba-common-bin smbclient gnupg
+        run: sudo apt-get update && sudo apt-get install -y samba samba-common-bin smbclient gnupg e2fsprogs
       - run: cargo fetch --locked
       - run: cargo fmt --check
       - run: cargo test --locked

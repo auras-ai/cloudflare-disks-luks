@@ -22,6 +22,7 @@ class Plan:
     cloud_mode: str = 'create'
     location: str = 'auto'
     prefix: str = 'encrypted-files-v1'
+    sparse_image: bool = True
 
     def validate(self):
         require(bool(re.fullmatch('[a-fA-F0-9]{32}', self.account_id)), "Account ID must be 32 hex characters")
@@ -38,6 +39,7 @@ class Plan:
         require(address not in (network.network_address, network.broadcast_address) or network.prefixlen >= 31,
                 "Gateway address must not be a network or broadcast address")
         require(type(self.size_gib) is int and 4 <= self.size_gib <= 4096, "Storage size must be 4–4096 GiB")
+        require(type(self.sparse_image) is bool, "Sparse image setting must be a boolean")
         require(self.cloud_mode in ('create', 'manual'), "Choose create or manual Cloudflare setup")
         require(self.location in ('auto', 'apac', 'eeur', 'enam', 'weur', 'wnam', 'oc'), "Invalid R2 location hint")
         require(bool(re.fullmatch('[A-Za-z0-9_-]{1,128}', self.prefix)), "Invalid encrypted prefix")
@@ -50,6 +52,10 @@ class Plan:
     @property
     def cache_bytes(self):
         return min(10 * GIB, (self.size_gib - 2) * GIB)
+
+    @property
+    def mount_options(self):
+        return 'nodev,nosuid,discard' if self.sparse_image else 'nodev,nosuid'
 
     def json(self):
         return asdict(self)

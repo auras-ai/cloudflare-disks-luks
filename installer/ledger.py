@@ -23,14 +23,16 @@ class Ledger:
     def load(cls, path):
         data = json.loads(read_private(path))
         require(data.get('schema') == 1, 'Unsupported setup journal version')
-        Plan(**data['plan']).validate()
+        ledger = cls(path, data)
+        ledger.plan.validate()
         for key in ('luks_uuid', 'filesystem_uuid', 'install_id', 'key_id'):
             uuid.UUID(data[key])
-        return cls(path, data)
+        return ledger
 
     @property
     def plan(self):
-        return Plan(**self.data['plan']).validate()
+        # Journals written before sparse provisioning retain their recorded behavior.
+        return Plan(**{'sparse_image': False, **self.data['plan']}).validate()
 
     def get(self, key, default=None):
         return self.data.get(key, default)

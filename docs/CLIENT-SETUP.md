@@ -6,9 +6,13 @@
 - A reserved/static private IPv4 address and the allowed client network CIDR.
   The supported default is a LAN subnet containing the gateway. A VPN must
   already be configured; the installer does not provision one.
-- Persistent local ext4, XFS or Btrfs storage. The default image uses 16 GiB,
-  plus at least 4 GiB free headroom. Increase this for the largest files and
-  expected write volume during an Internet outage. Never shrink the image.
+- Persistent local ext4, XFS or Btrfs storage with free space for metadata, setup
+  files and actual cached data. Setup calculates the metadata/workspace budget
+  from the filesystem layout (roughly 0.5 GiB with default settings). The sparse
+  image's 16 GiB capacity ceiling is not reserved; physical usage grows with data
+  and filesystem/encryption overhead. Deleted cache blocks are reclaimed
+  automatically. Keep free host space available for expected writes, including
+  during an Internet outage. Never shrink the image.
 - Cloudflare R2 enabled/billing configured, the 32-character account ID and a
   new bucket name. The default/global R2 jurisdiction is supported; jurisdiction-
   specific endpoints are not supported by this candidate.
@@ -59,7 +63,7 @@ References: [R2 tokens](https://developers.cloudflare.com/r2/api/tokens/),
 2. Extract into a trusted directory and run `sudo ./setup install --install-deps`.
    Package automation targets Ubuntu 24.04. On other systemd Linux distributions,
    install dependencies from the operations guide first and omit `--install-deps`.
-3. Enter account/bucket, choose an interface, allowed subnet and image size.
+3. Enter account/bucket, choose an interface, allowed subnet and local capacity limit.
 4. Confirm the displayed plan. Choose the LUKS and SMB passwords in hidden prompts.
    The SMB password is 12–128 bytes, without control characters or leading/trailing
    whitespace; LUKS/recovery passphrases need at least 16 bytes.

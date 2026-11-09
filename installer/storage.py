@@ -5,9 +5,15 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import tempfile
 
 from .common import hidden, install_same, no_symlinks, private_dir, require, run
 from .model import GIB
+
+MIB = 1024**2
+SPARSE_BOOTSTRAP_BYTES = 64 * MIB
+# Header/recovery copies, service state, acceptance files and temporary export work.
+SPARSE_SETUP_WORK_BYTES = 128 * MIB
 
 
 class Storage:
@@ -50,7 +56,10 @@ class Storage:
         if not p.image.exists():
             require(not log.get('image_identity'), 'Recorded image is missing; restore it, never recreate it')
             backing = self.backing()
-            require(shutil.disk_usage(p.base).free >= size + 4 * GIB, 'Insufficient free space: image plus 4 GiB headroom required')
+            required = SPARSE_BOOTSTRAP_BYTES if log.plan.sparse_image else size + 4 * GIB
+            require(shutil.disk_usage(p.base).free >= required,
+                    'Insufficient free space: 64 MiB needed to create the LUKS header and inspect filesystem layout' if log.plan.sparse_image else
+                    'Insufficient free space: image plus 4 GiB headroom required')
             fd = os.open(no_symlinks(p.image), os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             try:
                 os.fsync(fd)
@@ -72,7 +81,11 @@ class Storage:
             require(flags and 'C' in flags[0], 'Btrfs image must have No_COW before allocation; inspect partial allocation')
         fd = os.open(p.image, os.O_RDWR | os.O_NOFOLLOW)
         try:
-            os.posix_fallocate(fd, 0, size)
+            if log.plan.sparse_image:
+                # Logical capacity only; data and filesystem metadata allocate blocks on demand.
+                os.ftruncate(fd, size)
+            else:
+                os.posix_fallocate(fd, 0, size)
             os.fsync(fd)
         finally:
             os.close(fd)
@@ -103,6 +116,10 @@ class Storage:
         device = next((line.split(':', 1)[1].strip() for line in status.splitlines()
                        if line.strip().startswith('device:')), None)
         require(device == loop and 'LUKS2' in status, 'Mapping does not belong to the recorded LUKS2 image')
+        if self.ledger.plan.sparse_image:
+            flags = next((line.split(':', 1)[1].split() for line in status.splitlines()
+                          if line.strip().startswith('flags:')), [])
+            require('discards' in flags, 'Sparse image mapping must allow discards; inspect before resuming')
 
     def open(self, loop, passphrase=None):
         require(run(['cryptsetup', 'luksUUID', loop]).stdout.decode().strip() == self.ledger.get('luks_uuid'),
@@ -113,7 +130,8 @@ class Storage:
         require(not list((Path('/sys/block') / Path(loop).name / 'holders').iterdir()),
                 'Image has another mapping (possibly desktop auto-unlock); inspect before resuming')
         passphrase = passphrase or hidden('Existing LUKS passphrase')
-        run(['cryptsetup', 'open', '--type', 'luks2', '--key-file', '-', loop, self.paths.mapper.name],
+        flags = ['--allow-discards', '--persistent'] if self.ledger.plan.sparse_image else []
+        run(['cryptsetup', 'open', '--type', 'luks2', '--key-file', '-', *flags, loop, self.paths.mapper.name],
             data=passphrase.encode(), timeout=180)
         self.check_mapping(loop)
 
@@ -125,10 +143,11 @@ class Storage:
         rows = json.loads(result.stdout)['filesystems']
         require(len(rows) == 1, 'Ambiguous storage mount')
         row = rows[0]
+        options = {'rw', *self.ledger.plan.mount_options.split(',')}
         require(row['target'] == str(self.paths.storage) and row['fstype'] == 'ext4'
                 and row['uuid'] == self.ledger.get('filesystem_uuid')
                 and os.stat(row['source']).st_rdev == self.paths.mapper.stat().st_rdev
-                and {'rw', 'nodev', 'nosuid'} <= set(row['options'].split(',')),
+                and options <= set(row['options'].split(',')),
                 'Storage mount identity or mount options differ')
         return True
 
@@ -140,9 +159,45 @@ class Storage:
             require(not any(self.paths.storage.iterdir()), 'Storage underlay is not empty')
             checked = run(['e2fsck', '-p', self.paths.mapper], check=False, timeout=600)
             require(checked.returncode in (0, 1), 'Filesystem needs manual repair; retain image and keys')
-            run(['mount', '-o', 'nodev,nosuid', self.paths.mapper, self.paths.storage])
+            run(['mount', '-o', self.ledger.plan.mount_options, self.paths.mapper, self.paths.storage])
             require(self.verify_mount(), 'Encrypted mount did not appear')
         os.chmod(self.paths.storage, 0o755)
+        if self.ledger.plan.sparse_image:
+            # Verify discard passthrough and reclaim free extents after setup/recovery.
+            # The discard mount option returns subsequently freed cache blocks automatically.
+            trimmed = run(['fstrim', self.paths.storage], check=False, timeout=600)
+            require(trimmed.returncode == 0, 'Cannot reclaim sparse storage; check discard support for the image and mapping')
+
+    def _mkfs(self, target):
+        run(['mkfs.ext4', '-m', '1', '-U', self.ledger.get('filesystem_uuid'), target], timeout=600)
+
+    def check_filesystem_space(self):
+        if not self.ledger.plan.sparse_image:
+            return
+        capacity = int(run(['blockdev', '--getsize64', self.paths.mapper]).stdout)
+        require(0 < capacity < self.ledger.plan.size_gib * GIB, 'Unexpected encrypted filesystem capacity')
+        # Ask the installed mkfs for its layout on a disposable sparse file. This
+        # accounts for its actual journal/inode defaults, including lazy metadata
+        # that will be initialized later, rather than reserving a fixed number of GiB.
+        with tempfile.TemporaryDirectory(prefix='.layout-', dir=self.paths.base) as directory:
+            candidate = Path(directory) / 'filesystem.img'
+            fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, 'wb') as image:
+                image.truncate(capacity)
+            self._mkfs(candidate)
+            output = run(['dumpe2fs', '-h', candidate], env={**os.environ, 'LC_ALL': 'C'}).stdout.decode()
+            fields = dict(line.split(':', 1) for line in output.splitlines() if ':' in line)
+            blocks, free, block_size = (int(fields[key]) for key in ('Block count', 'Free blocks', 'Block size'))
+            require(blocks > 0 and 0 <= free < blocks and block_size in (1024, 2048, 4096, 8192, 16384, 32768, 65536)
+                    and blocks * block_size <= capacity, 'Cannot determine filesystem metadata space')
+            metadata = (blocks - free) * block_size
+        # Check after deleting the probe, so its temporary blocks are available again.
+        required = ((metadata + SPARSE_SETUP_WORK_BYTES + MIB - 1) // MIB) * MIB
+        require(shutil.disk_usage(self.paths.base).free >= required,
+                f'Insufficient free space: {required // MIB} MiB needed for filesystem metadata and setup files')
+        print(f'Sparse storage setup budget: {required // MIB} MiB for metadata and setup files. '
+              'Cached data allocates additional space on demand.', flush=True)
+        return required
 
     def provision(self):
         self.allocate()
@@ -169,8 +224,9 @@ class Storage:
         else:
             require(not self.ledger.get('filesystem_format_started'),
                     'Filesystem formatting was interrupted; inspect manually, no automatic reformat')
+            self.check_filesystem_space()
             self.ledger.set(filesystem_format_started=True)
-            run(['mkfs.ext4', '-m', '1', '-U', self.ledger.get('filesystem_uuid'), self.paths.mapper], timeout=600)
+            self._mkfs(self.paths.mapper)
         self.ledger.set(filesystem_ready=True)
         self.mount()
 

@@ -27,7 +27,7 @@ jobs:
           test -s LICENSE
           python3 -c 'import os,tomllib; p=tomllib.load(open("Cargo.toml","rb"))["package"]; assert p.get("license") and os.environ["RELEASE_TAG"] == "v"+p["version"]'
       - name: Test dependencies
-        run: sudo apt-get update && sudo apt-get install -y samba samba-common-bin smbclient gnupg
+        run: sudo apt-get update && sudo apt-get install -y samba samba-common-bin smbclient gnupg e2fsprogs
       - run: cargo fetch --locked
       - run: cargo fmt --check
       - run: cargo test --locked

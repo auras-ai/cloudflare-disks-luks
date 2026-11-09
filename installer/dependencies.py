@@ -13,7 +13,8 @@ from .common import SetupError, atomic_write, install_same, require, run
 
 RCLONE_VERSION = '1.70.3'
 RCLONE_SHA256 = '7d69057e69385f6514a9684c7eaa424d972096b130284bb34dd967c4ed4f9dad'
-TOOLS = ('cryptsetup', 'losetup', 'mkfs.ext4', 'e2fsck', 'mount', 'findmnt', 'blkid', 'chattr', 'lsattr',
+TOOLS = ('cryptsetup', 'losetup', 'blockdev', 'mkfs.ext4', 'dumpe2fs', 'e2fsck', 'mount', 'findmnt',
+         'fstrim', 'blkid', 'chattr', 'lsattr',
          'useradd', 'runuser', 'ip', 'systemctl', 'systemd-run', 'systemd-analyze', 'udevadm',
          'rclone', 'smbd', 'testparm', 'pdbedit', 'smbclient', 'fusermount3', 'nft', 'gpg', 'gpgconf')
 POLICY = b'#!/bin/sh\n# cloudflare-disk dependency installation guard\n# fresh-samba: %s\nexit 101\n'

@@ -52,7 +52,7 @@ zero queued/error/retrying transfers, then verify their bytes independently in R
 | Location | Purpose |
 | --- | --- |
 | `/var/lib/cloudflare-disk/setup.json` | Root-only, nonsecret progress and storage identity |
-| `/var/lib/cloudflare-disk/local.luks` | Preallocated, root-only LUKS2 image |
+| `/var/lib/cloudflare-disk/local.luks` | Sparse, root-only LUKS2 image (16 GiB default capacity) |
 | `/srv/r2-disk/state` | Private profile, keys, Samba and control state |
 | `/srv/r2-disk/cache` | Persistent full VFS cache; may contain pending writes |
 | `/srv/r2-disk/mount` | Decrypted FUSE mount, sealed when the gateway is running |
@@ -68,6 +68,41 @@ The bare `/srv/r2-disk` underlay is root-owned 0700. Its mounted filesystem root
 is 0755; protected children are 0700 and secrets are 0600. The supervisor, rclone
 and smbd run as `r2disk` with systemd's inherited `CAP_NET_BIND_SERVICE`. They are
 not strongly sandboxed from each other. Root and that UID are trusted.
+
+## Local disk usage
+
+New installations use a sparse LUKS2 image. The selected size is its logical
+capacity, not an up-front reservation. Actual allocation includes cached files,
+pending uploads, keys/state and filesystem/encryption metadata. Clean files may
+stay cached after upload until rclone evicts them.
+
+The installer persists LUKS discard passthrough and mounts ext4 with
+`nodev,nosuid,discard`, including in the systemd mount unit. Freed cache blocks
+are returned to the backing filesystem automatically after filesystem commits.
+Setup and every `unlock` also run a scoped `fstrim` and require it to succeed.
+Discard exposes which local blocks are unused; file contents remain encrypted.
+
+```sh
+sudo du -h /var/lib/cloudflare-disk/local.luks     # actual allocated space
+sudo ls -lh /var/lib/cloudflare-disk/local.luks   # logical capacity
+df -h /var/lib/cloudflare-disk                    # host filesystem free space
+sudo fstrim -v /srv/r2-disk                       # reclaim free blocks now
+```
+
+Setup first needs 64 MiB free to create the LUKS header and inspect the filesystem
+layout. Before formatting the encrypted filesystem, it measures the installed
+ext4 formatter's metadata layout on a disposable sparse file, then removes that
+file. It checks for enough free space for the filesystem metadata (including lazy
+inode initialization) plus 128 MiB for setup/recovery work. The resulting budget
+is typically about 0.5 GiB with the default capacity; setup prints its actual
+requirement. This is a free-space check, not a reservation. Larger capacities or
+different formatter defaults can require more metadata.
+
+Future writes and metadata allocation need real free host space. Monitor
+the host filesystem as well as the encrypted filesystem: `available_bytes` and
+rclone's minimum-free-space setting describe the latter. Rclone's cache limits
+are soft and dirty files cannot be evicted. Earlier setup journals retain their
+preallocated policy when resumed or unlocked; this default does not migrate them.
 
 ## Firewall
 
